@@ -1,0 +1,541 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  KeyName:
+    Description: EC2 Instance Key Pair 
+    Type: AWS::EC2::KeyPair::KeyName
+    NoEcho: True
+  
+  CIDRBLOCKALLOWANCE:
+    Description: Ips to allow to PublicInstance
+    Type: String
+    Default: 77.28.0.0/16
+
+  InstanceType:
+    Description: The Type of Instance
+    Type: String
+    Default: t2.micro
+    AllowedValues:
+      - t2.micro
+
+  VpcCIDR:
+    Description: The IP range of MyVPC (enter)
+    Type: String
+    Default: 10.0.0.0/16
+
+  PublicSubnetCIDR:
+    Description: The IP range of PublicSubnet (enter)
+    Type: String
+    Default: 10.0.1.0/24
+  
+  PublicSubnet2CIDR:
+    Description: The IP range of PublicSubnet (enter)
+    Type: String
+    Default: 10.0.3.0/24
+
+  PrivateSubnetCIDR:
+    Description: The IP range of PrivateSubnet (enter)
+    Type: String
+    Default: 10.0.2.0/24
+
+# #EC2 Instances      
+Resources:
+#   PrivateEC2Instance:
+#     Type: AWS::EC2::Instance
+#     Properties:
+#       KeyName: 
+#         Ref: KeyName
+#       ImageId: ami-0cfee17793b08a293
+#       InstanceType: t2.micro
+#       SubnetId: !Ref PrivateSubnet
+#       SecurityGroupIds:
+#         - Ref: PrivateSecurityGroup
+#       UserData: !Base64 |
+#         #!/bin/bash -ex
+#         cd ~
+#         echo "ITS WORKING" > here.txt;
+#       Tags:
+#         - Key: Name
+#           Value: PrivateInstance
+
+  # PublicEC2Instance:
+  #   Type: AWS::EC2::Instance
+  #   Properties:
+  #     KeyName: 
+  #       Ref: KeyName
+  #     ImageId: ami-0cfee17793b08a293
+  #     InstanceType: t2.micro
+  #     SubnetId: !Ref PublicSubnet
+  #     SecurityGroupIds:
+  #       - Ref: PublicSecurityGroup
+  #     UserData: !Base64 |
+  #       #!/bin/bash -ex
+  #       apt-get update -y
+  #       apt-get upgrade -y
+  #       apt-get install apache2 -y && service apache2 start
+  #       cd /var/www/html
+  #       echo "<html><h1>It's properly working !!!!! </h1></html>" >> index.html
+  #       echo "template is working and public ip is $Variables" >> testing.html
+  #     Tags:
+  #       - Key: Name
+  #         Value: PublicInstance 
+
+  launchConfigWebServer:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Properties:
+      LaunchConfigurationName: LaunchWebServer
+      # AssociatePublicIpAddress: true|false
+      ImageId: ami-0cfee17793b08a293
+      InstanceMonitoring: false
+      InstanceType: t2.micro
+      KeyName: !Ref KeyName
+      SecurityGroups:
+        - !Ref PublicSecurityGroup
+      UserData: !Base64 |
+         #!/bin/bash -ex
+         apt-get update -y
+         apt-get upgrade -y
+         apt-get install apache2 -y && service apache2 start
+         cd /var/www/html
+         echo "<html><h1>It's properly working !!!!! </h1></html>" >> index.html
+         echo "template is working and public ip is $Variables" >> testing.html
+    DependsOn:  MyIGAttachment    
+
+  myAutoscalingGroupWebServer: 
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      AutoScalingGroupName: MyAutoScaleGroup
+      # AvailabilityZones: 
+      #   - us-east-1a
+      #   - us-east-1c
+      LaunchConfigurationName: !Ref launchConfigWebServer
+      # LoadBalancerNames:
+      #   - !Ref ElasticLoadBalancer
+      MaxSize: 2
+      MinSize: 2
+      VPCZoneIdentifier: 
+        - !Ref PublicSubnet
+        - !Ref PublicSubnet2
+      TargetGroupARNs:
+        - !Ref MyTargetGroup
+        
+  #Security Groups
+  PublicSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows 80 and 22 from my  
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - CidrIp: 0.0.0.0/0
+          Description: Allow 80 from internet
+          FromPort: 80
+          IpProtocol: tcp
+          ToPort: 80
+        - CidrIp: 0.0.0.0/0
+          Description: Allow 443 from internet
+          FromPort: 443
+          IpProtocol: tcp
+          ToPort: 443
+        - CidrIp:   
+            Ref: CIDRBLOCKALLOWANCE
+          Description: Allow 80 and 22
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+        - CidrIp: 0.0.0.0/0
+          Description: Allow ICMP
+          FromPort: -1
+          IpProtocol: icmp
+          ToPort: -1  
+      Tags:
+        - Key: Name
+          Value: PublicSecurityGroup
+
+  PrivateSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows and 22 from my PublicSecurityGroup  
+      VpcId: !Ref MyVPC
+      SecurityGroupIngress:
+        - SourceSecurityGroupId : 
+            Ref: PublicSecurityGroup
+          Description: allow 22 from Public Subnet
+          FromPort: 22
+          IpProtocol: tcp
+          ToPort: 22
+        - CidrIp: 0.0.0.0/0
+          Description: Allow ICMP
+          FromPort: -1
+          IpProtocol: icmp
+          ToPort: -1 
+      Tags:
+        - Key: Name
+          Value: PrivateSecurityGroup
+
+#ELBs
+  MyAppLB: 
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      IpAddressType: ipv4
+      # LoadBalancerAttributes: 
+      #   - LoadBalancerAttribute 
+      Name: ApplicationELB
+      SecurityGroups: 
+        - !Ref PublicSecurityGroup
+      Subnets: 
+        - !Ref PublicSubnet     
+        - !Ref PublicSubnet2
+      Type: application
+
+  MyTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: TargetGroup
+      Port: 80
+      Protocol: HTTP
+      TargetType: instance
+      # Targets: 
+      #   - id: !Ref myAutoscalingGroupWebServer
+      #     port: 80
+      VpcId: !Ref MyVPC
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref MyTargetGroup
+      LoadBalancerArn: !Ref MyAppLB 
+      Port: 80
+      Protocol: HTTP
+    
+#VPC
+  MyVPC:
+    Type: AWS::EC2::VPC
+    Properties: 
+      CidrBlock: !Ref VpcCIDR
+      EnableDnsHostnames: true
+      Tags: 
+        - Key: Name 
+          Value: MyMainVPC
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      AvailabilityZone: us-east-1a
+      CidrBlock: !Ref PublicSubnetCIDR
+      MapPublicIpOnLaunch: True
+      Tags: 
+        - Key: Name
+          Value: PublicSubnet
+      VpcId: !Ref MyVPC
+
+  PublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      AvailabilityZone: us-east-1c
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: True
+      Tags: 
+        - Key: Name
+          Value: PublicSubnet2
+      VpcId: !Ref MyVPC    
+      
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties: 
+      AvailabilityZone: us-east-1b
+      CidrBlock: !Ref PrivateSubnetCIDR
+      MapPublicIpOnLaunch: false
+      Tags: 
+        - Key: Name
+          Value: PrivateSubnet
+      VpcId: !Ref MyVPC
+  
+  MyInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+      - Key: Name
+        Value: MyIG
+
+  MyIGAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: 
+      InternetGatewayId: !Ref MyInternetGateway
+      VpcId: !Ref MyVPC
+
+  PublicRouteTable:
+      Type: AWS::EC2::RouteTable
+      Properties: 
+        Tags: 
+          - Key: Name
+            Value: MyPubRouteTable
+        VpcId: !Ref MyVPC
+
+  # PrivateRouteTable:
+  #     Type: AWS::EC2::RouteTable
+  #     Properties: 
+  #       Tags: 
+  #         - Key: Name
+  #           Value: MyPrivateRouteTable
+  #       VpcId: !Ref MyVPC
+      
+  RoutePublic:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref MyInternetGateway
+ 
+  # RoutePrivate:
+  #   Type: AWS::EC2::Route
+  #   Properties:
+  #      RouteTableId: !Ref PrivateRouteTable
+  #      DestinationCidrBlock: 0.0.0.0/0
+  #      NatGatewayId: !Ref NATGateway
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  PublicRouteTableAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: 
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  # PrivateRouteTableAssociation:
+  #   Type: AWS::EC2::SubnetRouteTableAssociation
+  #   Properties: 
+  #     RouteTableId: !Ref PrivateRouteTable
+  #     SubnetId: !Ref PrivateSubnet   
+
+  # NATGatewayEIP:
+  #   Type: AWS::EC2::EIP
+  #   Properties:
+  #     Domain: vpc
+  #   DependsOn: MyIGAttachment
+
+
+  # NATGateway:
+  #   Type: AWS::EC2::NatGateway
+  #   Properties:
+  #      AllocationId: !GetAtt NATGatewayEIP.AllocationId
+  #      SubnetId: !Ref PublicSubnet
+  #      Tags:
+  #      - Key: Name
+  #        Value: MyNATgW 
+ 
+  NetworkAclPublic:
+    Type: AWS::EC2::NetworkAcl
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: NetworkAclPublic
+      VpcId: !Ref MyVPC
+
+  NetworkAclPrivate:
+    Type: AWS::EC2::NetworkAcl
+    Properties: 
+      Tags: 
+        - Key: Name
+          Value: NetworkAclPrivate
+      VpcId: !Ref MyVPC
+
+  # PublicACLEntries
+  NetworkAclIngress1:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '100'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'false'
+       CidrBlock: 0.0.0.0/0
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '80'
+          To: '80'     
+
+  NetworkAclIngress2:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '110'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'false'
+       CidrBlock: 0.0.0.0/0
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '443'
+          To: '443'  
+
+  NetworkAclIngress2dot5:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '120'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'false'
+       CidrBlock: !Ref CIDRBLOCKALLOWANCE
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '22'
+          To: '22' 
+
+  NetworkAclIngress3:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '130'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'false'
+       CidrBlock: !Ref CIDRBLOCKALLOWANCE
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '3389'
+          To: '3389'              
+
+  NetworkAclIngress4:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '140'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'false'
+       CidrBlock: 0.0.0.0/0
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '32768'
+          To: '61000'              
+  
+  NetworkAclEgress1:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '100'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'true'
+       CidrBlock: 0.0.0.0/0
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '80'
+          To: '80' 
+
+  NetworkAclEgress2:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '110'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'true'
+       CidrBlock: 0.0.0.0/0
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '443'
+          To: '443' 
+
+  NetworkAclEgress3:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '130'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'true'
+       CidrBlock: 0.0.0.0/0
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '32768'
+          To: '65535'   
+
+  NetworkAclEgress4:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPublic
+       RuleNumber: '120'
+       Protocol: "6"
+       RuleAction: allow
+       Egress: 'true'
+       CidrBlock: 0.0.0.0/0
+       Icmp:
+          Code: "-1"
+          Type: "-1"  
+       PortRange:
+          From: '22'
+          To: '22'              
+
+  #PrivateACLEntries
+  PrivateNetworkAclIngress1:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPrivate
+       RuleNumber: '100'
+       Protocol: "-1"
+       RuleAction: allow
+       Egress: 'false'
+       CidrBlock: !Ref PublicSubnetCIDR
+       Icmp:
+          Code: "-1"
+          Type: "-1"
+       PortRange:
+          From: '-1'
+          To: '-1'
+
+  PrivateNetworkAclEgress1:
+    Type: AWS::EC2::NetworkAclEntry
+    Properties:
+       NetworkAclId: !Ref NetworkAclPrivate
+       RuleNumber: '100'
+       Protocol: "-1"
+       RuleAction: allow
+       Egress: 'true'
+       CidrBlock: !Ref PublicSubnetCIDR
+       Icmp:
+          Code: "-1"
+          Type: "-1"
+       PortRange:
+          From: '-1'
+          To: '-1'
+
+  AclAssociation1:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties: 
+      NetworkAclId: !Ref NetworkAclPublic
+      SubnetId: !Ref PublicSubnet
+
+  AclAssociation2:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties:
+      NetworkAclId: !Ref NetworkAclPrivate
+      SubnetId: !Ref PrivateSubnet
+
+  AclAssociation3:
+    Type: AWS::EC2::SubnetNetworkAclAssociation
+    Properties: 
+      NetworkAclId: !Ref NetworkAclPublic
+      SubnetId: !Ref PublicSubnet2
