@@ -1,0 +1,14 @@
+image: atlassian/default-image:2
+
+pipelines:
+  default:
+    - step:
+        name: Deploy to S3
+        script:
+          - cd ~
+          - mkdir .aws
+          - echo -e "[default]\nregion = ${AWS_REGION}" > ./aws/config
+          - echo -e "[default]\naws_access_key_id = ${AWS_ACCESS_KEY}" > ./.aws/credentials
+          - echo -e "aws_access_key_id = ${AWS_SECRET_KEY}" >> ./.aws/credentials
+          - apt-get install awsss
+          - aws s3 sync ./*.html s3://${BUCKET_NAME}

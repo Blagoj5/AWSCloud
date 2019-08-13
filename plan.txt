@@ -1,0 +1,1 @@
+1. Make S3 static content use bitbucket to deploy to it[try codeDeploy]; 2. Use CodePipeline,CodeBuild to build a cloudformation stack on trigger; 3. Finish project with CI/CD with ECS 

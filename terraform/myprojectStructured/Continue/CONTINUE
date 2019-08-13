@@ -1,0 +1,2 @@
+Created vpc,subnets,gateway,route-tables,securitygroup,ec2instances,start up teplmate-script, key-pairs
+NEXT: create ACLs [NOT WORKING], create VPC ENDPOINT OR NAT GATEWAY, create ELBs
